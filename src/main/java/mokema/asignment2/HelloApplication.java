@@ -11,6 +11,7 @@ import javafx.scene.image.Image;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.scene.media.Media;
 import javafx.scene.media.MediaPlayer;
 import javafx.scene.media.MediaView;
@@ -19,12 +20,10 @@ import javafx.scene.text.Font;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.embed.swing.SwingFXUtils;
+import javafx.util.Duration;
 import javax.imageio.ImageIO;
 import java.io.File;
 import java.util.Stack;
-import javafx.util.Duration;
-import javafx.scene.layout.VBox;
-import javafx.geometry.Insets;
 
 public class HelloApplication extends Application {
 
@@ -35,6 +34,8 @@ public class HelloApplication extends Application {
     private static final String[] AUDIO_FORMATS = {"*.mp3", "*.wav"};
     private static final String[] VIDEO_FORMATS = {"*.mp4", "*.avi", "*.mov"};
     private static final String[] FONT_FAMILIES = {"Arial", "Verdana", "Times New Roman", "Courier New"};
+    private static final double RESIZE_HANDLE_SIZE = 8;
+    private static final double MIN_IMAGE_SIZE = 20;
 
     // Drawing Tools
     private Canvas canvas;
@@ -58,7 +59,16 @@ public class HelloApplication extends Application {
     private String currentTool = "Draw";
     private double startX, startY;
     private boolean isDrawing = false;
+
+    // Image Handling
     private Image currentImage;
+    private double imageX, imageY;
+    private double imageWidth, imageHeight;
+    private boolean isDraggingImage = false;
+    private boolean isResizingImage = false;
+    private double dragStartX, dragStartY;
+    private int resizeDirection = 0; // 0=none, 1=top, 2=right, 3=bottom, 4=left,
+    // 5=top-left, 6=top-right, 7=bottom-right, 8=bottom-left
 
     public static void main(String[] args) {
         launch(args);
@@ -149,6 +159,29 @@ public class HelloApplication extends Application {
         startX = e.getX();
         startY = e.getY();
 
+        if (currentTool.equals("Image") && currentImage != null) {
+            double mouseX = e.getX();
+            double mouseY = e.getY();
+
+            if (mouseX >= imageX && mouseX <= imageX + imageWidth &&
+                    mouseY >= imageY && mouseY <= imageY + imageHeight) {
+
+                resizeDirection = getResizeDirection(mouseX, mouseY);
+
+                if (resizeDirection == 0) {
+                    isDraggingImage = true;
+                    dragStartX = mouseX - imageX;
+                    dragStartY = mouseY - imageY;
+                } else {
+                    isResizingImage = true;
+                    dragStartX = mouseX;
+                    dragStartY = mouseY;
+                }
+                e.consume();
+                return;
+            }
+        }
+
         gc.setStroke(strokeColorPicker.getValue());
         gc.setFill(fillColorPicker.getValue());
         gc.setLineWidth(sizeSlider.getValue());
@@ -165,9 +198,85 @@ public class HelloApplication extends Application {
         }
     }
 
+    private int getResizeDirection(double mouseX, double mouseY) {
+        boolean nearLeft = Math.abs(mouseX - imageX) < RESIZE_HANDLE_SIZE;
+        boolean nearRight = Math.abs(mouseX - (imageX + imageWidth)) < RESIZE_HANDLE_SIZE;
+        boolean nearTop = Math.abs(mouseY - imageY) < RESIZE_HANDLE_SIZE;
+        boolean nearBottom = Math.abs(mouseY - (imageY + imageHeight)) < RESIZE_HANDLE_SIZE;
+
+        if (nearTop && nearLeft) return 5;
+        if (nearTop && nearRight) return 6;
+        if (nearBottom && nearRight) return 7;
+        if (nearBottom && nearLeft) return 8;
+        if (nearTop) return 1;
+        if (nearRight) return 2;
+        if (nearBottom) return 3;
+        if (nearLeft) return 4;
+
+        return 0;
+    }
+
     private void handleMouseDragged(MouseEvent e) {
         double x = e.getX();
         double y = e.getY();
+
+        if (currentTool.equals("Image") && currentImage != null) {
+            if (isDraggingImage) {
+                imageX = x - dragStartX;
+                imageY = y - dragStartY;
+            }
+            else if (isResizingImage) {
+                double deltaX = x - dragStartX;
+                double deltaY = y - dragStartY;
+
+                switch (resizeDirection) {
+                    case 1: // Top
+                        imageHeight -= deltaY;
+                        imageY += deltaY;
+                        break;
+                    case 2: // Right
+                        imageWidth += deltaX;
+                        break;
+                    case 3: // Bottom
+                        imageHeight += deltaY;
+                        break;
+                    case 4: // Left
+                        imageWidth -= deltaX;
+                        imageX += deltaX;
+                        break;
+                    case 5: // Top-left
+                        imageWidth -= deltaX;
+                        imageX += deltaX;
+                        imageHeight -= deltaY;
+                        imageY += deltaY;
+                        break;
+                    case 6: // Top-right
+                        imageWidth += deltaX;
+                        imageHeight -= deltaY;
+                        imageY += deltaY;
+                        break;
+                    case 7: // Bottom-right
+                        imageWidth += deltaX;
+                        imageHeight += deltaY;
+                        break;
+                    case 8: // Bottom-left
+                        imageWidth -= deltaX;
+                        imageX += deltaX;
+                        imageHeight += deltaY;
+                        break;
+                }
+
+                if (imageWidth < MIN_IMAGE_SIZE) imageWidth = MIN_IMAGE_SIZE;
+                if (imageHeight < MIN_IMAGE_SIZE) imageHeight = MIN_IMAGE_SIZE;
+
+                dragStartX = x;
+                dragStartY = y;
+            }
+            // Force complete redraw of canvas
+            redrawCanvas();
+            e.consume();
+            return;
+        }
 
         switch (currentTool) {
             case "Draw":
@@ -193,6 +302,13 @@ public class HelloApplication extends Application {
     }
 
     private void handleMouseReleased(MouseEvent e) {
+        if (currentTool.equals("Image") && currentImage != null) {
+            isDraggingImage = false;
+            isResizingImage = false;
+            saveState();
+            return;
+        }
+
         double x = e.getX();
         double y = e.getY();
 
@@ -247,13 +363,81 @@ public class HelloApplication extends Application {
     }
 
     private void addImage() {
-        File file = showFileChooser("Select Image", "Image Files", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp");
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select Image");
+        fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Image Files", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp")
+        );
+        File file = fileChooser.showOpenDialog(null);
+
         if (file != null) {
             currentImage = new Image(file.toURI().toString());
-            gc.drawImage(currentImage, startX, startY,
-                    currentImage.getWidth(), currentImage.getHeight());
+
+            // Set initial size to 1/4 of original size or 200px (whichever is smaller)
+            double scaleFactor = 0.25;
+            imageWidth = Math.min(currentImage.getWidth() * scaleFactor, 200);
+            imageHeight = currentImage.getHeight() * (imageWidth / currentImage.getWidth());
+
+            // Position at mouse click location or center if not available
+            if (startX == 0 && startY == 0) {
+                imageX = (canvas.getWidth() - imageWidth) / 2;
+                imageY = (canvas.getHeight() - imageHeight) / 2;
+            } else {
+                imageX = startX - imageWidth/2; // Center image at click position
+                imageY = startY - imageHeight/2;
+            }
+
+            redrawCanvas();
             saveState();
         }
+    }
+
+    private void redrawCanvas() {
+        // First clear the entire canvas
+        gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+
+        // Redraw everything from the undo stack (background)
+        if (!undoStack.isEmpty()) {
+            gc.drawImage(undoStack.peek(), 0, 0);
+        }
+
+        // Draw the current image if it exists
+        if (currentImage != null) {
+            gc.drawImage(currentImage, imageX, imageY, imageWidth, imageHeight);
+
+            // Draw resize handles when image is selected
+            if (currentTool.equals("Image")) {
+                drawImageHandles();
+            }
+        }
+    }
+
+    private void drawImageHandles() {
+        gc.setStroke(Color.BLUE);
+        gc.setLineWidth(1);
+        gc.strokeRect(imageX, imageY, imageWidth, imageHeight);
+
+        gc.setFill(Color.LIGHTBLUE);
+
+        // Corners
+        gc.fillRect(imageX - RESIZE_HANDLE_SIZE/2, imageY - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX + imageWidth - RESIZE_HANDLE_SIZE/2, imageY - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX + imageWidth - RESIZE_HANDLE_SIZE/2, imageY + imageHeight - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX - RESIZE_HANDLE_SIZE/2, imageY + imageHeight - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+
+        // Edges
+        gc.fillRect(imageX + imageWidth/2 - RESIZE_HANDLE_SIZE/2, imageY - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX + imageWidth - RESIZE_HANDLE_SIZE/2, imageY + imageHeight/2 - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX + imageWidth/2 - RESIZE_HANDLE_SIZE/2, imageY + imageHeight - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX - RESIZE_HANDLE_SIZE/2, imageY + imageHeight/2 - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
     }
 
     private void addAudio() {
@@ -287,30 +471,29 @@ public class HelloApplication extends Application {
             Stage mediaStage = new Stage();
             mediaStage.setTitle(title);
 
-            // Create control buttons
-            Button playBtn = createMediaButton("▶", () -> mediaPlayer.play());
-            Button pauseBtn = createMediaButton("⏸", () -> mediaPlayer.pause());
-            Button stopBtn = createMediaButton("⏹", () -> {
+            Button playBtn = new Button("▶");
+            Button pauseBtn = new Button("⏸");
+            Button stopBtn = new Button("⏹");
+
+            playBtn.setOnAction(e -> mediaPlayer.play());
+            pauseBtn.setOnAction(e -> mediaPlayer.pause());
+            stopBtn.setOnAction(e -> {
                 mediaPlayer.stop();
-                mediaPlayer.seek(mediaPlayer.getStartTime());
+                mediaPlayer.seek(Duration.ZERO);
             });
 
-            // Volume control
             Slider volumeSlider = new Slider(0, 1, 0.5);
-            volumeSlider.valueProperty().bindBidirectional(mediaPlayer.volumeProperty());
+            mediaPlayer.volumeProperty().bind(volumeSlider.valueProperty());
 
-            // Time slider and labels
             Slider timeSlider = new Slider();
-            Label timeLabel = new Label("00:00 / 00:00");
             Label currentTimeLabel = new Label("00:00");
             Label totalTimeLabel = new Label("00:00");
 
-            // Set up time slider behavior
-            mediaPlayer.currentTimeProperty().addListener((obs, oldVal, newVal) -> {
+            mediaPlayer.currentTimeProperty().addListener((observable, oldValue, newValue) -> {
                 if (!timeSlider.isValueChanging()) {
-                    timeSlider.setValue(newVal.toSeconds());
+                    timeSlider.setValue(newValue.toSeconds());
                 }
-                currentTimeLabel.setText(formatTime(newVal));
+                currentTimeLabel.setText(formatTime(newValue));
             });
 
             mediaPlayer.setOnReady(() -> {
@@ -319,23 +502,20 @@ public class HelloApplication extends Application {
                 totalTimeLabel.setText(formatTime(totalDuration));
             });
 
-            timeSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
+            timeSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
                 if (timeSlider.isValueChanging()) {
-                    mediaPlayer.seek(Duration.seconds(newVal.doubleValue()));
+                    mediaPlayer.seek(Duration.seconds(newValue.doubleValue()));
                 }
             });
 
-            // Layout for time controls
             HBox timeBox = new HBox(5, currentTimeLabel, timeSlider, totalTimeLabel);
             timeBox.setAlignment(Pos.CENTER);
 
-            // Main controls layout
             HBox controls = new HBox(10, playBtn, pauseBtn, stopBtn,
                     new Label("Volume:"), volumeSlider);
             controls.setAlignment(Pos.CENTER);
             controls.setPadding(new Insets(10));
 
-            // Main container
             BorderPane root = new BorderPane();
 
             if (isVideo) {
@@ -343,7 +523,6 @@ public class HelloApplication extends Application {
                 mediaView.setFitWidth(640);
                 root.setCenter(mediaView);
             } else {
-                // For audio, show a visualization or just the controls
                 root.setCenter(new Label("Now Playing: " + title));
             }
 
@@ -366,12 +545,6 @@ public class HelloApplication extends Application {
         return String.format("%02d:%02d", minutes, seconds);
     }
 
-    private Button createMediaButton(String text, Runnable action) {
-        Button button = new Button(text);
-        button.setOnAction(e -> action.run());
-        return button;
-    }
-
     private void saveState() {
         undoStack.push(canvas.snapshot(null, null));
         redoStack.clear();
@@ -388,13 +561,6 @@ public class HelloApplication extends Application {
         if (!redoStack.isEmpty()) {
             undoStack.push(redoStack.pop());
             redrawCanvas();
-        }
-    }
-
-    private void redrawCanvas() {
-        gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
-        if (!undoStack.isEmpty()) {
-            gc.drawImage(undoStack.peek(), 0, 0);
         }
     }
 
