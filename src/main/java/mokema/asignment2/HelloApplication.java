@@ -22,6 +22,9 @@ import javafx.embed.swing.SwingFXUtils;
 import javax.imageio.ImageIO;
 import java.io.File;
 import java.util.Stack;
+import javafx.util.Duration;
+import javafx.scene.layout.VBox;
+import javafx.geometry.Insets;
 
 public class HelloApplication extends Application {
 
@@ -284,6 +287,7 @@ public class HelloApplication extends Application {
             Stage mediaStage = new Stage();
             mediaStage.setTitle(title);
 
+            // Create control buttons
             Button playBtn = createMediaButton("▶", () -> mediaPlayer.play());
             Button pauseBtn = createMediaButton("⏸", () -> mediaPlayer.pause());
             Button stopBtn = createMediaButton("⏹", () -> {
@@ -291,31 +295,75 @@ public class HelloApplication extends Application {
                 mediaPlayer.seek(mediaPlayer.getStartTime());
             });
 
+            // Volume control
             Slider volumeSlider = new Slider(0, 1, 0.5);
             volumeSlider.valueProperty().bindBidirectional(mediaPlayer.volumeProperty());
 
+            // Time slider and labels
+            Slider timeSlider = new Slider();
+            Label timeLabel = new Label("00:00 / 00:00");
+            Label currentTimeLabel = new Label("00:00");
+            Label totalTimeLabel = new Label("00:00");
+
+            // Set up time slider behavior
+            mediaPlayer.currentTimeProperty().addListener((obs, oldVal, newVal) -> {
+                if (!timeSlider.isValueChanging()) {
+                    timeSlider.setValue(newVal.toSeconds());
+                }
+                currentTimeLabel.setText(formatTime(newVal));
+            });
+
+            mediaPlayer.setOnReady(() -> {
+                Duration totalDuration = media.getDuration();
+                timeSlider.setMax(totalDuration.toSeconds());
+                totalTimeLabel.setText(formatTime(totalDuration));
+            });
+
+            timeSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
+                if (timeSlider.isValueChanging()) {
+                    mediaPlayer.seek(Duration.seconds(newVal.doubleValue()));
+                }
+            });
+
+            // Layout for time controls
+            HBox timeBox = new HBox(5, currentTimeLabel, timeSlider, totalTimeLabel);
+            timeBox.setAlignment(Pos.CENTER);
+
+            // Main controls layout
             HBox controls = new HBox(10, playBtn, pauseBtn, stopBtn,
                     new Label("Volume:"), volumeSlider);
             controls.setAlignment(Pos.CENTER);
             controls.setPadding(new Insets(10));
 
+            // Main container
             BorderPane root = new BorderPane();
 
             if (isVideo) {
                 mediaView = new MediaView(mediaPlayer);
                 mediaView.setFitWidth(640);
                 root.setCenter(mediaView);
+            } else {
+                // For audio, show a visualization or just the controls
+                root.setCenter(new Label("Now Playing: " + title));
             }
 
-            root.setBottom(controls);
+            VBox bottomPanel = new VBox(10, timeBox, controls);
+            bottomPanel.setPadding(new Insets(10));
+            root.setBottom(bottomPanel);
 
-            mediaStage.setScene(new Scene(root, isVideo ? 640 : 300, isVideo ? 480 : 100));
+            mediaStage.setScene(new Scene(root, isVideo ? 640 : 400, isVideo ? 480 : 150));
             mediaStage.show();
 
             mediaStage.setOnCloseRequest(e -> mediaPlayer.dispose());
         } catch (Exception e) {
             showError("Media Error", "Could not load media: " + e.getMessage());
         }
+    }
+
+    private String formatTime(Duration duration) {
+        int minutes = (int) duration.toMinutes();
+        int seconds = (int) duration.toSeconds() % 60;
+        return String.format("%02d:%02d", minutes, seconds);
     }
 
     private Button createMediaButton(String text, Runnable action) {
