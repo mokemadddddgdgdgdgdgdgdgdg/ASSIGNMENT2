@@ -60,6 +60,7 @@ public class HelloApplication extends Application {
     private double startX, startY;
     private boolean isDrawing = false;
 
+
     // Image Handling
     private Image currentImage;
     private double imageX, imageY;
