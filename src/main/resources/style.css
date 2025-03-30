@@ -1,18 +1,31 @@
+/* Style for the main toolbar container */
 .toolbar {
+    /* Dark blue background color */
     background-color: #2E3B55;
+    /* Internal spacing around toolbar content */
     padding: 10px;
+    /* Flexbox layout for child elements */
     display: flex;
+    /* Center items vertically */
     align-items: center;
+    /* Distribute space between items */
     justify-content: space-between;
 }
 
+/* Base style for all buttons */
 .button {
+    /* Green background color */
     -fx-background-color: #4CAF50;
+    /* White text color */
     -fx-text-fill: white;
+    /* Internal padding */
     -fx-padding: 8px;
+    /* Font size */
     -fx-font-size: 14px;
 }
 
+/* Hover state for buttons */
 .button:hover {
+    /* Slightly darker green on hover */
     -fx-background-color: #45a049;
 }
