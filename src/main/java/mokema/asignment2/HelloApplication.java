@@ -52,7 +52,7 @@ public class HelloApplication extends Application {
     private ComboBox<String> toolSelector = new ComboBox<>();
     private ComboBox<String> fontSelector = new ComboBox<>();
     private Slider sizeSlider = new Slider(1, 50, 5);
-    private TextField textInput = new TextField("Type here");
+    private TextField textInput = new TextField("NGOLA");
 
     // Media playback components
     private MediaPlayer mediaPlayer;
@@ -100,7 +100,7 @@ public class HelloApplication extends Application {
         }
 
         // Configure and show primary stage
-        primaryStage.setTitle("Complete Digital Whiteboard");
+        primaryStage.setTitle("Digital Whiteboard");
         primaryStage.setScene(scene);
         primaryStage.show();
     }
