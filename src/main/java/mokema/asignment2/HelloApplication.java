@@ -42,14 +42,11 @@ public class HelloApplication extends Application {
     private ToolbarManager toolbarManager;    // Manages UI toolbar
 
     // Main entry point for the application
-
-
     public static void main(String[] args) {
         launch(args);  // Standard JavaFX entry point
     }
 
     // JavaFX start method - initializes and shows the application
-
 
     @Override
     public void start(Stage primaryStage) {
