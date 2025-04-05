@@ -47,7 +47,6 @@ public class HelloApplication extends Application {
     }
 
     // JavaFX start method - initializes and shows the application
-
     @Override
     public void start(Stage primaryStage) {
         initializeComponents();    // Create application components
