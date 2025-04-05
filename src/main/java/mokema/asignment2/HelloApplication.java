@@ -1,7 +1,7 @@
-// Main package declaration
+// Package declaration for the application
 package mokema.asignment2;
 
-// JavaFX and other necessary imports
+// Import necessary JavaFX and other libraries
 import javafx.application.Application;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -27,51 +27,71 @@ import javax.imageio.ImageIO;
 import java.io.File;
 import java.util.Stack;
 
-//Main application class for Digital Whiteboard
-
-
+// Main application class extending JavaFX Application
 public class HelloApplication extends Application {
 
-    // Constants for canvas dimensions
+    // Constants for canvas dimensions and file formats
     private static final int CANVAS_WIDTH = 900;
     private static final int CANVAS_HEIGHT = 600;
+    private static final String[] SAVE_FORMATS = {"PNG", "JPG", "BMP", "GIF"};
+    private static final String[] AUDIO_FORMATS = {"*.mp3", "*.wav"};
+    private static final String[] VIDEO_FORMATS = {"*.mp4", "*.avi", "*.mov"};
+    private static final String[] FONT_FAMILIES = {"Arial", "Verdana", "Times New Roman", "Courier New"};
+    private static final double RESIZE_HANDLE_SIZE = 8;
+    private static final double MIN_IMAGE_SIZE = 20;
 
-    // Core application components
-    private DrawingCanvas drawingCanvas;       // Handles drawing operations
-    private MediaHandler mediaHandler;        // Manages audio/video playback
-    private ToolbarManager toolbarManager;    // Manages UI toolbar
+    // Drawing components
+    private Canvas canvas;
+    private GraphicsContext gc;
+    private Stack<Image> undoStack = new Stack<>();  // Stores states for undo functionality
+    private Stack<Image> redoStack = new Stack<>();  // Stores states for redo functionality
 
-    // Main entry point for the application
+    // UI controls
+    private ColorPicker strokeColorPicker = new ColorPicker(Color.BLACK);
+    private ColorPicker fillColorPicker = new ColorPicker(Color.TRANSPARENT);
+    private ComboBox<String> toolSelector = new ComboBox<>();
+    private ComboBox<String> fontSelector = new ComboBox<>();
+    private Slider sizeSlider = new Slider(1, 50, 5);
+    private TextField textInput = new TextField("NGOLA");
+
+    // Media playback components
+    private MediaPlayer mediaPlayer;
+    private MediaView mediaView;
+
+    // Drawing state tracking
+    private String currentTool = "Draw";
+    private double startX, startY;
+    private boolean isDrawing = false;
+
+    // Image manipulation state
+    private Image currentImage;
+    private double imageX, imageY;
+    private double imageWidth, imageHeight;
+    private boolean isDraggingImage = false;
+    private boolean isResizingImage = false;
+    private double dragStartX, dragStartY;
+    private int resizeDirection = 0; // 0=none, 1=top, 2=right, 3=bottom, 4=left,
+    // 5=top-left, 6=top-right, 7=bottom-right, 8=bottom-left
+
+    // Main method to launch the application
     public static void main(String[] args) {
-        launch(args);  // Standard JavaFX entry point
+        launch(args);
     }
 
-
-    // JavaFX start method - initializes and shows the application
+    // JavaFX start method - main entry point
     @Override
     public void start(Stage primaryStage) {
-        initializeComponents();    // Create application components
-        setupMainLayout(primaryStage);  // Set up the UI layout
-    }
+        initializeCanvas();
+        setupToolSelector();
+        setupFontSelector();
+        setupSizeSlider();
 
-    // Initialize the main application components
-    private void initializeComponents() {
-        drawingCanvas = new DrawingCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
-        mediaHandler = new MediaHandler();
-        toolbarManager = new ToolbarManager(drawingCanvas, mediaHandler);
-    }
+        // Create main layout
+        BorderPane root = new BorderPane();
+        root.setCenter(canvas);
+        root.setTop(createToolbar());
 
-    // Sets up the main application layout
-    // primaryStage The main application window
-
-    private void setupMainLayout(Stage primaryStage) {
-        BorderPane root = new BorderPane();  // Main layout container
-
-        // Set up the layout hierarchy
-        root.setCenter(drawingCanvas.getCanvas());  // Drawing area in center
-        root.setTop(toolbarManager.createToolbar());  // Toolbar at top
-
-        // Create scene with optional CSS styling
+        // Set up scene with optional CSS styling
         Scene scene = new Scene(root, 1000, 700);
         try {
             scene.getStylesheets().add(getClass().getResource("/style.css").toExternalForm());
@@ -79,765 +99,564 @@ public class HelloApplication extends Application {
             System.out.println("Stylesheet not found, using default styling");
         }
 
-        // Configure and show the primary stage
+        // Configure and show primary stage
         primaryStage.setTitle("Digital Whiteboard");
         primaryStage.setScene(scene);
         primaryStage.show();
     }
 
+    // Initialize the drawing canvas
+    private void initializeCanvas() {
+        canvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
+        gc = canvas.getGraphicsContext2D();
+        clearCanvas();
+        setupMouseHandlers();
+    }
 
-    // class representing the drawing canvas and its functionality
-    private static class DrawingCanvas {
-        // Core drawing components
-        private final Canvas canvas;          // The actual drawing surface
-        private final GraphicsContext gc;     // Drawing context for the canvas
+    // Create the toolbar with drawing controls
+    private HBox createToolbar() {
+        Button undoBtn = createButton("Undo", this::undo);
+        Button redoBtn = createButton("Redo", this::redo);
+        Button clearBtn = createButton("Clear", this::clearCanvas);
+        Button saveBtn = createButton("Save", this::saveCanvas);
 
-        // Undo/redo functionality stacks
-        private final Stack<Image> undoStack = new Stack<>();
-        private final Stack<Image> redoStack = new Stack<>();
+        HBox toolbar = new HBox(10);
+        toolbar.setPadding(new Insets(10));
+        toolbar.getChildren().addAll(
+                toolSelector,
+                new Label("Stroke:"), strokeColorPicker,
+                new Label("Fill:"), fillColorPicker,
+                new Label("Size:"), sizeSlider,
+                fontSelector, textInput,
+                undoBtn, redoBtn, clearBtn, saveBtn
+        );
+        return toolbar;
+    }
 
-        // UI controls for drawing properties
-        private final ColorPicker strokeColorPicker = new ColorPicker(Color.BLACK);
-        private final ColorPicker fillColorPicker = new ColorPicker(Color.TRANSPARENT);
-        private final ComboBox<String> toolSelector = new ComboBox<>();
-        private final ComboBox<String> fontSelector = new ComboBox<>();
-        private final Slider sizeSlider = new Slider(1, 50, 5);
-        private final TextField textInput = new TextField("NGOLA");
+    // Helper method to create styled buttons
+    private Button createButton(String text, Runnable action) {
+        Button button = new Button(text);
+        button.setOnAction(e -> action.run());
+        return button;
+    }
 
-        // Drawing state tracking variables
-        private String currentTool = "Draw";  // Currently selected tool
-        private double startX, startY;        // Starting coordinates for shapes
-        private boolean isDrawing = false;    // Flag for drawing in progress
+    // Set up the tool selection dropdown
+    private void setupToolSelector() {
+        toolSelector.getItems().addAll(
+                "Draw", "Line", "Rectangle", "Circle",
+                "Text", "Image", "Audio", "Video", "Eraser"
+        );
+        toolSelector.setValue("Draw");
+        toolSelector.setOnAction(e -> currentTool = toolSelector.getValue());
+    }
 
-        // Image manipulation state
-        private Image currentImage;           // Currently loaded image
-        private double imageX, imageY;        // Image position
-        private double imageWidth, imageHeight; // Image dimensions
-        private boolean isDraggingImage = false; // Image dragging flag
-        private boolean isResizingImage = false; // Image resizing flag
-        private double dragStartX, dragStartY; // Drag starting position
-        private int resizeDirection = 0;      // Direction for resizing (0=none, 1-8 for different edges/corners)
+    // Set up the font selection dropdown
+    private void setupFontSelector() {
+        fontSelector.getItems().addAll(FONT_FAMILIES);
+        fontSelector.setValue("Arial");
+    }
 
-        // Constants
-        private static final String[] FONT_FAMILIES = {"Arial", "Verdana", "Times New Roman", "Courier New"};
-        private static final double RESIZE_HANDLE_SIZE = 8; // Size of image resize handles
-        private static final double MIN_IMAGE_SIZE = 20;    // Minimum size for images
+    // Configure the brush size slider
+    private void setupSizeSlider() {
+        sizeSlider.setShowTickLabels(true);
+        sizeSlider.setShowTickMarks(true);
+    }
 
-        //Constructor - creates a new drawing canvas
-        public DrawingCanvas(int width, int height) {
-            canvas = new Canvas(width, height);
-            gc = canvas.getGraphicsContext2D();
-            initialize();  // Set up initial canvas state
-        }
+    // Set up mouse event handlers for the canvas
+    private void setupMouseHandlers() {
+        canvas.setOnMousePressed(this::handleMousePressed);
+        canvas.setOnMouseDragged(this::handleMouseDragged);
+        canvas.setOnMouseReleased(this::handleMouseReleased);
+    }
 
-        // Initialize canvas properties and event handlers
-        private void initialize() {
-            clearCanvas();         // Start with blank canvas
-            setupMouseHandlers();  // Set up mouse event handlers
-            setupToolSelector();   // Configure tool selection dropdown
-            setupFontSelector();   // Configure font selection dropdown
-            setupSizeSlider();     // Configure line size slider
-        }
+    // Handle mouse press events
+    private void handleMousePressed(MouseEvent e) {
+        saveState();
+        startX = e.getX();
+        startY = e.getY();
 
-        // Getter methods for UI components
-        public Canvas getCanvas() { return canvas; }
-        public GraphicsContext getGc() { return gc; }
-        public ColorPicker getStrokeColorPicker() { return strokeColorPicker; }
-        public ColorPicker getFillColorPicker() { return fillColorPicker; }
-        public ComboBox<String> getToolSelector() { return toolSelector; }
-        public ComboBox<String> getFontSelector() { return fontSelector; }
-        public Slider getSizeSlider() { return sizeSlider; }
-        public TextField getTextInput() { return textInput; }
+        // Special handling for image manipulation
+        if (currentTool.equals("Image") && currentImage != null) {
+            double mouseX = e.getX();
+            double mouseY = e.getY();
 
-        // Set up the tool selection dropdown
-        private void setupToolSelector() {
-            toolSelector.getItems().addAll(
-                    "Draw", "Line", "Rectangle", "Circle",
-                    "Text", "Image", "Eraser"
-            );
-            toolSelector.setValue("Draw");
-            toolSelector.setOnAction(e -> currentTool = toolSelector.getValue());
-        }
+            if (mouseX >= imageX && mouseX <= imageX + imageWidth &&
+                    mouseY >= imageY && mouseY <= imageY + imageHeight) {
 
-        // Set up the font selection dropdown
-        private void setupFontSelector() {
-            fontSelector.getItems().addAll(FONT_FAMILIES);
-            fontSelector.setValue("Arial");
-        }
+                resizeDirection = getResizeDirection(mouseX, mouseY);
 
-        // Configure the line width slider
-        private void setupSizeSlider() {
-            sizeSlider.setShowTickLabels(true);
-            sizeSlider.setShowTickMarks(true);
-        }
-
-        // Set up mouse event handlers for the canvas
-        private void setupMouseHandlers() {
-            canvas.setOnMousePressed(this::handleMousePressed);
-            canvas.setOnMouseDragged(this::handleMouseDragged);
-            canvas.setOnMouseReleased(this::handleMouseReleased);
-        }
-
-
-        // Handles mouse press events on the canvas
-
-        private void handleMousePressed(MouseEvent e) {
-            saveState();  // Save current state for undo/redo
-
-            // Record starting position
-            startX = e.getX();
-            startY = e.getY();
-
-            // Handle image interaction if needed
-            if (handleImageInteraction(e)) {
-                return;
-            }
-
-            // Set drawing properties from UI controls
-            gc.setStroke(strokeColorPicker.getValue());
-            gc.setFill(fillColorPicker.getValue());
-            gc.setLineWidth(sizeSlider.getValue());
-
-            // Tool-specific press handling
-            handleToolSpecificPress();
-        }
-
-
-        // Handles image interaction (dragging/resizing)
-        //return true if image interaction was handled
-        private boolean handleImageInteraction(MouseEvent e) {
-            if (currentTool.equals("Image") && currentImage != null) {
-                double mouseX = e.getX();
-                double mouseY = e.getY();
-
-                // Check if click was within image bounds
-                if (mouseX >= imageX && mouseX <= imageX + imageWidth &&
-                        mouseY >= imageY && mouseY <= imageY + imageHeight) {
-
-                    // Determine if user clicked on a resize handle or the image body
-                    resizeDirection = getResizeDirection(mouseX, mouseY);
-
-                    if (resizeDirection == 0) {
-                        // Dragging the image
-                        isDraggingImage = true;
-                        dragStartX = mouseX - imageX;
-                        dragStartY = mouseY - imageY;
-                    } else {
-                        // Resizing the image
-                        isResizingImage = true;
-                        dragStartX = mouseX;
-                        dragStartY = mouseY;
-                    }
-                    e.consume();
-                    return true;
+                if (resizeDirection == 0) {
+                    isDraggingImage = true;
+                    dragStartX = mouseX - imageX;
+                    dragStartY = mouseY - imageY;
+                } else {
+                    isResizingImage = true;
+                    dragStartX = mouseX;
+                    dragStartY = mouseY;
                 }
-            }
-            return false;
-        }
-
-        // Determines which edge/corner of the image was clicked for resizing
-        //@return Direction code (0=none, 1-8 for different edges/corners)
-        private int getResizeDirection(double mouseX, double mouseY) {
-            // Check proximity to each edge/corner
-            boolean nearLeft = Math.abs(mouseX - imageX) < RESIZE_HANDLE_SIZE;
-            boolean nearRight = Math.abs(mouseX - (imageX + imageWidth)) < RESIZE_HANDLE_SIZE;
-            boolean nearTop = Math.abs(mouseY - imageY) < RESIZE_HANDLE_SIZE;
-            boolean nearBottom = Math.abs(mouseY - (imageY + imageHeight)) < RESIZE_HANDLE_SIZE;
-
-            // Return direction code based on which edges are near
-            if (nearTop && nearLeft) return 5;    // Top-left corner
-            if (nearTop && nearRight) return 6;   // Top-right corner
-            if (nearBottom && nearRight) return 7;// Bottom-right corner
-            if (nearBottom && nearLeft) return 8;// Bottom-left corner
-            if (nearTop) return 1;               // Top edge
-            if (nearRight) return 2;             // Right edge
-            if (nearBottom) return 3;            // Bottom edge
-            if (nearLeft) return 4;             // Left edge
-
-            return 0;  // No edge/corner nearby
-        }
-
-        // Handle tool-specific behavior when mouse is pressed
-        private void handleToolSpecificPress() {
-            switch (currentTool) {
-                case "Draw":
-                    gc.beginPath();
-                    gc.moveTo(startX, startY);
-                    isDrawing = true;
-                    break;
-                case "Eraser":
-                    eraseAt(startX, startY);
-                    break;
-            }
-        }
-
-
-        // Handles mouse drag events on the canvas
-
-
-        private void handleMouseDragged(MouseEvent e) {
-            double x = e.getX();
-            double y = e.getY();
-
-            // Handle image dragging/resizing if needed
-            if (handleImageDragAndResize(x, y)) {
                 e.consume();
                 return;
             }
-
-            // Tool-specific drag handling
-            handleToolSpecificDrag(x, y);
         }
 
+        // Set drawing properties based on current selections
+        gc.setStroke(strokeColorPicker.getValue());
+        gc.setFill(fillColorPicker.getValue());
+        gc.setLineWidth(sizeSlider.getValue());
 
-        //Handles image dragging and resizing during mouse drag
-        // return true if image interaction was handled
+        // Tool-specific press handling
+        switch (currentTool) {
+            case "Draw":
+                gc.beginPath();
+                gc.moveTo(startX, startY);
+                isDrawing = true;
+                break;
+            case "Eraser":
+                eraseAt(startX, startY);
+                break;
+        }
+    }
 
-        private boolean handleImageDragAndResize(double x, double y) {
-            if (currentTool.equals("Image") && currentImage != null) {
-                if (isDraggingImage) {
-                    // Update image position based on drag
-                    imageX = x - dragStartX;
-                    imageY = y - dragStartY;
-                } else if (isResizingImage) {
-                    // Resize the image based on drag direction
-                    resizeImage(x, y);
+    // Determine which part of an image is being interacted with
+    private int getResizeDirection(double mouseX, double mouseY) {
+        boolean nearLeft = Math.abs(mouseX - imageX) < RESIZE_HANDLE_SIZE;
+        boolean nearRight = Math.abs(mouseX - (imageX + imageWidth)) < RESIZE_HANDLE_SIZE;
+        boolean nearTop = Math.abs(mouseY - imageY) < RESIZE_HANDLE_SIZE;
+        boolean nearBottom = Math.abs(mouseY - (imageY + imageHeight)) < RESIZE_HANDLE_SIZE;
+
+        if (nearTop && nearLeft) return 5;
+        if (nearTop && nearRight) return 6;
+        if (nearBottom && nearRight) return 7;
+        if (nearBottom && nearLeft) return 8;
+        if (nearTop) return 1;
+        if (nearRight) return 2;
+        if (nearBottom) return 3;
+        if (nearLeft) return 4;
+
+        return 0;
+    }
+
+    // Handle mouse drag events
+    private void handleMouseDragged(MouseEvent e) {
+        double x = e.getX();
+        double y = e.getY();
+
+        // Image manipulation handling
+        if (currentTool.equals("Image") && currentImage != null) {
+            if (isDraggingImage) {
+                imageX = x - dragStartX;
+                imageY = y - dragStartY;
+            }
+            else if (isResizingImage) {
+                double deltaX = x - dragStartX;
+                double deltaY = y - dragStartY;
+
+                // Handle resizing from different directions
+                switch (resizeDirection) {
+                    case 1: // Top
+                        imageHeight -= deltaY;
+                        imageY += deltaY;
+                        break;
+                    case 2: // Right
+                        imageWidth += deltaX;
+                        break;
+                    case 3: // Bottom
+                        imageHeight += deltaY;
+                        break;
+                    case 4: // Left
+                        imageWidth -= deltaX;
+                        imageX += deltaX;
+                        break;
+                    case 5: // Top-left
+                        imageWidth -= deltaX;
+                        imageX += deltaX;
+                        imageHeight -= deltaY;
+                        imageY += deltaY;
+                        break;
+                    case 6: // Top-right
+                        imageWidth += deltaX;
+                        imageHeight -= deltaY;
+                        imageY += deltaY;
+                        break;
+                    case 7: // Bottom-right
+                        imageWidth += deltaX;
+                        imageHeight += deltaY;
+                        break;
+                    case 8: // Bottom-left
+                        imageWidth -= deltaX;
+                        imageX += deltaX;
+                        imageHeight += deltaY;
+                        break;
                 }
-                redrawCanvas();  // Refresh the canvas
-                return true;
+
+                // Enforce minimum size constraints
+                if (imageWidth < MIN_IMAGE_SIZE) imageWidth = MIN_IMAGE_SIZE;
+                if (imageHeight < MIN_IMAGE_SIZE) imageHeight = MIN_IMAGE_SIZE;
+
+                dragStartX = x;
+                dragStartY = y;
             }
-            return false;
+            // Redraw canvas with updated image
+            redrawCanvas();
+            e.consume();
+            return;
         }
 
+        // Tool-specific drag handling
+        switch (currentTool) {
+            case "Draw":
+                gc.lineTo(x, y);
+                gc.stroke();
+                break;
+            case "Line":
+                redrawCanvas();
+                gc.strokeLine(startX, startY, x, y);
+                break;
+            case "Rectangle":
+                redrawCanvas();
+                drawRectangle(startX, startY, x, y);
+                break;
+            case "Circle":
+                redrawCanvas();
+                drawCircle(startX, startY, x, y);
+                break;
+            case "Eraser":
+                eraseAt(x, y);
+                break;
+        }
+    }
 
-        //Resizes the image based on mouse movement and resize direction
-
-        private void resizeImage(double x, double y) {
-            double deltaX = x - dragStartX;
-            double deltaY = y - dragStartY;
-
-            // Adjust image dimensions based on which edge/corner is being dragged
-            switch (resizeDirection) {
-                case 1:  // Top edge
-                    imageHeight -= deltaY;
-                    imageY += deltaY;
-                    break;
-                case 2:  // Right edge
-                    imageWidth += deltaX;
-                    break;
-                case 3:  // Bottom edge
-                    imageHeight += deltaY;
-                    break;
-                case 4:  // Left edge
-                    imageWidth -= deltaX;
-                    imageX += deltaX;
-                    break;
-                case 5:  // Top-left corner
-                    imageWidth -= deltaX;
-                    imageX += deltaX;
-                    imageHeight -= deltaY;
-                    imageY += deltaY;
-                    break;
-                case 6:  // Top-right corner
-                    imageWidth += deltaX;
-                    imageHeight -= deltaY;
-                    imageY += deltaY;
-                    break;
-                case 7:  // Bottom-right corner
-                    imageWidth += deltaX;
-                    imageHeight += deltaY;
-                    break;
-                case 8:  // Bottom-left corner
-                    imageWidth -= deltaX;
-                    imageX += deltaX;
-                    imageHeight += deltaY;
-                    break;
-            }
-
-            enforceMinimumImageSize();  // Prevent image from becoming too small
-            dragStartX = x;  // Update drag starting position
-            dragStartY = y;
+    // Handle mouse release events
+    private void handleMouseReleased(MouseEvent e) {
+        if (currentTool.equals("Image") && currentImage != null) {
+            isDraggingImage = false;
+            isResizingImage = false;
+            saveState();
+            return;
         }
 
-        // Ensures image doesn't get smaller than minimum size
-        private void enforceMinimumImageSize() {
-            if (imageWidth < MIN_IMAGE_SIZE) imageWidth = MIN_IMAGE_SIZE;
-            if (imageHeight < MIN_IMAGE_SIZE) imageHeight = MIN_IMAGE_SIZE;
+        double x = e.getX();
+        double y = e.getY();
+
+        // Tool-specific release handling
+        switch (currentTool) {
+            case "Text":
+                drawText(textInput.getText(), x, y);
+                break;
+            case "Image":
+                addImage();
+                break;
+            case "Audio":
+                addAudio();
+                break;
+            case "Video":
+                addVideo();
+                break;
         }
 
-
-        // Handles toolspecific behavior during mouse drag
-
-        private void handleToolSpecificDrag(double x, double y) {
-            switch (currentTool) {
-                case "Draw":
-                    gc.lineTo(x, y);
-                    gc.stroke();
-                    break;
-                case "Line":
-                    redrawCanvas();
-                    gc.strokeLine(startX, startY, x, y);
-                    break;
-                case "Rectangle":
-                    redrawCanvas();
-                    drawRectangle(startX, startY, x, y);
-                    break;
-                case "Circle":
-                    redrawCanvas();
-                    drawCircle(startX, startY, x, y);
-                    break;
-                case "Eraser":
-                    eraseAt(x, y);
-                    break;
-            }
+        if (isDrawing) {
+            saveState();
+            isDrawing = false;
         }
+    }
 
+    // Draw a rectangle between two points
+    private void drawRectangle(double x1, double y1, double x2, double y2) {
+        double width = x2 - x1;
+        double height = y2 - y1;
 
-        // Handles mouse release events on the canvas
-        private void handleMouseReleased(MouseEvent e) {
-            if (currentTool.equals("Image") && currentImage != null) {
-                // Finish image manipulation
-                isDraggingImage = false;
-                isResizingImage = false;
-                saveState();  // Save final state
-                return;
-            }
-
-            double x = e.getX();
-            double y = e.getY();
-
-            // Tool-specific release handling
-            handleToolSpecificRelease(x, y);
-
-            if (isDrawing) {
-                saveState();  // Save final state
-                isDrawing = false;
-            }
+        if (fillColorPicker.getValue() != Color.TRANSPARENT) {
+            gc.fillRect(x1, y1, width, height);
         }
+        gc.strokeRect(x1, y1, width, height);
+    }
 
+    // Draw a circle between two points (center to edge)
+    private void drawCircle(double x1, double y1, double x2, double y2) {
+        double radius = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
 
-        //Handles tool-specific behavior when mouse is released
-
-        private void handleToolSpecificRelease(double x, double y) {
-            switch (currentTool) {
-                case "Text":
-                    drawText(textInput.getText(), x, y);
-                    break;
-                case "Image":
-                    addImage();
-                    break;
-                case "Audio":
-                    // Handled by MediaHandler
-                    break;
-                case "Video":
-                    // Handled by MediaHandler
-                    break;
-            }
+        if (fillColorPicker.getValue() != Color.TRANSPARENT) {
+            gc.fillOval(x1 - radius, y1 - radius, radius * 2, radius * 2);
         }
+        gc.strokeOval(x1 - radius, y1 - radius, radius * 2, radius * 2);
+    }
 
+    // Draw text at specified position
+    private void drawText(String text, double x, double y) {
+        gc.setFont(Font.font(fontSelector.getValue(), sizeSlider.getValue() * 3));
+        gc.fillText(text, x, y);
+    }
 
-        //Draws a rectangle between two points
+    // Erase at specified position
+    private void eraseAt(double x, double y) {
+        double size = sizeSlider.getValue() * 2;
+        gc.clearRect(x - size/2, y - size/2, size, size);
+    }
 
-        private void drawRectangle(double x1, double y1, double x2, double y2) {
-            double width = x2 - x1;
-            double height = y2 - y1;
+    // Add an image to the canvas
+    private void addImage() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select Image");
+        fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Image Files", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp")
+        );
+        File file = fileChooser.showOpenDialog(null);
 
-            if (fillColorPicker.getValue() != Color.TRANSPARENT) {
-                gc.fillRect(x1, y1, width, height);  // Fill if color is not transparent
-            }
-            gc.strokeRect(x1, y1, width, height);    // Always draw outline
-        }
+        if (file != null) {
+            currentImage = new Image(file.toURI().toString());
 
-
-        //Draws a circle between two points (center to edge)
-
-        private void drawCircle(double x1, double y1, double x2, double y2) {
-            double radius = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-
-            if (fillColorPicker.getValue() != Color.TRANSPARENT) {
-                gc.fillOval(x1 - radius, y1 - radius, radius * 2, radius * 2);  // Fill if color is not transparent
-            }
-            gc.strokeOval(x1 - radius, y1 - radius, radius * 2, radius * 2);    // Always draw outline
-        }
-
-        //Draws text at specified position
-        private void drawText(String text, double x, double y) {
-            gc.setFont(Font.font(fontSelector.getValue(), sizeSlider.getValue() * 3));
-            gc.fillText(text, x, y);
-        }
-
-
-        //Erases at specified position
-
-
-        private void eraseAt(double x, double y) {
-            double size = sizeSlider.getValue() * 2;
-            gc.clearRect(x - size / 2, y - size / 2, size, size);
-        }
-
-
-        // Opens file chooser to add an image to the canvas
-
-        private void addImage() {
-            FileChooser fileChooser = new FileChooser();
-            fileChooser.setTitle("Select Image");
-            fileChooser.getExtensionFilters().addAll(
-                    new FileChooser.ExtensionFilter("Image Files", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp")
-            );
-            File file = fileChooser.showOpenDialog(null);
-
-            if (file != null) {
-                currentImage = new Image(file.toURI().toString());
-                scaleAndPositionImage();  // Scale and position the new image
-                redrawCanvas();          // Refresh the canvas
-                saveState();             // Save state for undo/redo
-            }
-        }
-
-
-        // Scales and positions a newly loaded image
-
-        private void scaleAndPositionImage() {
-            double scaleFactor = 0.25;  // Default scaling factor
+            // Scale image appropriately
+            double scaleFactor = 0.25;
             imageWidth = Math.min(currentImage.getWidth() * scaleFactor, 200);
             imageHeight = currentImage.getHeight() * (imageWidth / currentImage.getWidth());
 
-            // Position image - centered if no specific position set
+            // Position image
             if (startX == 0 && startY == 0) {
                 imageX = (canvas.getWidth() - imageWidth) / 2;
                 imageY = (canvas.getHeight() - imageHeight) / 2;
             } else {
-                imageX = startX - imageWidth / 2;
-                imageY = startY - imageHeight / 2;
-            }
-        }
-
-
-        //Redraws the entire canvas (used during image manipulation)
-
-        private void redrawCanvas() {
-            // Clear and redraw everything
-            gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
-
-            // Redraw previous state from undo stack if available
-            if (!undoStack.isEmpty()) {
-                gc.drawImage(undoStack.peek(), 0, 0);
+                imageX = startX - imageWidth/2;
+                imageY = startY - imageHeight/2;
             }
 
-            // Redraw current image if it exists
-            if (currentImage != null) {
-                gc.drawImage(currentImage, imageX, imageY, imageWidth, imageHeight);
+            redrawCanvas();
+            saveState();
+        }
+    }
 
-                // Draw resize handles if image tool is active
-                if (currentTool.equals("Image")) {
-                    drawImageHandles();
-                }
-            }
+    // Redraw the entire canvas
+    private void redrawCanvas() {
+        // Clear canvas
+        gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+
+        // Redraw previous state if available
+        if (!undoStack.isEmpty()) {
+            gc.drawImage(undoStack.peek(), 0, 0);
         }
 
+        // Draw current image with handles if selected
+        if (currentImage != null) {
+            gc.drawImage(currentImage, imageX, imageY, imageWidth, imageHeight);
 
-        //Draws resize handles around the current image
-
-        private void drawImageHandles() {
-            // Draw border around image
-            gc.setStroke(Color.BLUE);
-            gc.setLineWidth(1);
-            gc.strokeRect(imageX, imageY, imageWidth, imageHeight);
-
-            // Draw resize handles at corners and edges
-            gc.setFill(Color.LIGHTBLUE);
-
-            // Corner handles
-            gc.fillRect(imageX - RESIZE_HANDLE_SIZE / 2, imageY - RESIZE_HANDLE_SIZE / 2,
-                    RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
-            gc.fillRect(imageX + imageWidth - RESIZE_HANDLE_SIZE / 2, imageY - RESIZE_HANDLE_SIZE / 2,
-                    RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
-            gc.fillRect(imageX + imageWidth - RESIZE_HANDLE_SIZE / 2, imageY + imageHeight - RESIZE_HANDLE_SIZE / 2,
-                    RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
-            gc.fillRect(imageX - RESIZE_HANDLE_SIZE / 2, imageY + imageHeight - RESIZE_HANDLE_SIZE / 2,
-                    RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
-
-            // Edge handles
-            gc.fillRect(imageX + imageWidth / 2 - RESIZE_HANDLE_SIZE / 2, imageY - RESIZE_HANDLE_SIZE / 2,
-                    RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
-            gc.fillRect(imageX + imageWidth - RESIZE_HANDLE_SIZE / 2, imageY + imageHeight / 2 - RESIZE_HANDLE_SIZE / 2,
-                    RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
-            gc.fillRect(imageX + imageWidth / 2 - RESIZE_HANDLE_SIZE / 2, imageY + imageHeight - RESIZE_HANDLE_SIZE / 2,
-                    RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
-            gc.fillRect(imageX - RESIZE_HANDLE_SIZE / 2, imageY + imageHeight / 2 - RESIZE_HANDLE_SIZE / 2,
-                    RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
-        }
-
-
-        //Saves current canvas state to undo stack
-
-        private void saveState() {
-            undoStack.push(canvas.snapshot(null, null));
-            redoStack.clear();  // Clear redo stack when new state is saved
-        }
-
-
-        // Undo the last operation
-
-        public void undo() {
-            if (undoStack.size() > 1) {
-                redoStack.push(undoStack.pop());  // Move current state to redo stack
-                redrawCanvas();                   // Redraw previous state
-            }
-        }
-
-
-        //Redo the last undone operation
-
-        public void redo() {
-            if (!redoStack.isEmpty()) {
-                undoStack.push(redoStack.pop());  // Move state back to undo stack
-                redrawCanvas();                  // Redraw the state
-            }
-        }
-
-
-        // Clears the canvas completely
-
-        public void clearCanvas() {
-            gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
-            undoStack.clear();  // Clear history
-            redoStack.clear();
-            saveState();       // Save blank state
-        }
-
-
-        // Saves the canvas to an image file
-
-        public void saveCanvas() {
-            FileChooser fileChooser = new FileChooser();
-            fileChooser.setTitle("Save Canvas");
-
-            // Supported file formats
-            String[] SAVE_FORMATS = {"PNG", "JPG", "BMP", "GIF"};
-            for (String format : SAVE_FORMATS) {
-                fileChooser.getExtensionFilters().add(
-                        new FileChooser.ExtensionFilter(format, "*." + format.toLowerCase())
-                );
-            }
-
-            File file = fileChooser.showSaveDialog(null);
-            if (file != null) {
-                try {
-                    // Get selected format
-                    String extension = fileChooser.getSelectedExtensionFilter()
-                            .getDescription().split("\\(")[0].trim();
-
-                    // Save canvas snapshot to file
-                    ImageIO.write(
-                            SwingFXUtils.fromFXImage(canvas.snapshot(null, null), null),
-                            extension,
-                            file
-                    );
-                } catch (Exception e) {
-                    showError("Save Error", "Could not save file: " + e.getMessage());
-                }
+            if (currentTool.equals("Image")) {
+                drawImageHandles();
             }
         }
     }
 
+    // Draw resize handles around an image
+    private void drawImageHandles() {
+        gc.setStroke(Color.BLUE);
+        gc.setLineWidth(1);
+        gc.strokeRect(imageX, imageY, imageWidth, imageHeight);
 
-    //  class handling media (audio/video) playback
+        gc.setFill(Color.LIGHTBLUE);
 
-    private static class MediaHandler {
-        private MediaPlayer mediaPlayer;  // Current media player instance
-        private MediaView mediaView;      // For video display
+        // Draw corner handles
+        gc.fillRect(imageX - RESIZE_HANDLE_SIZE/2, imageY - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX + imageWidth - RESIZE_HANDLE_SIZE/2, imageY - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX + imageWidth - RESIZE_HANDLE_SIZE/2, imageY + imageHeight - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX - RESIZE_HANDLE_SIZE/2, imageY + imageHeight - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
 
-        // Supported file formats
-        private static final String[] AUDIO_FORMATS = {"*.mp3", "*.wav"};
-        private static final String[] VIDEO_FORMATS = {"*.mp4", "*.avi", "*.mov"};
+        // Draw edge handles
+        gc.fillRect(imageX + imageWidth/2 - RESIZE_HANDLE_SIZE/2, imageY - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX + imageWidth - RESIZE_HANDLE_SIZE/2, imageY + imageHeight/2 - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX + imageWidth/2 - RESIZE_HANDLE_SIZE/2, imageY + imageHeight - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+        gc.fillRect(imageX - RESIZE_HANDLE_SIZE/2, imageY + imageHeight/2 - RESIZE_HANDLE_SIZE/2,
+                RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+    }
 
-
-        // Opens file chooser to add audio to the canvas
-
-        public void addAudio() {
-            File file = showFileChooser("Select Audio", "Audio Files", AUDIO_FORMATS);
-            if (file != null) {
-                createMediaPlayer(file.toURI().toString(), "Audio Player", false);
-            }
+    // Add audio media to the canvas
+    private void addAudio() {
+        File file = showFileChooser("Select Audio", "Audio Files", AUDIO_FORMATS);
+        if (file != null) {
+            createMediaPlayer(file.toURI().toString(), "Audio Player", false);
         }
+    }
 
-
-        //Opens file chooser to add video to the canvas
-
-        public void addVideo() {
-            File file = showFileChooser("Select Video", "Video Files", VIDEO_FORMATS);
-            if (file != null) {
-                createMediaPlayer(file.toURI().toString(), "Video Player", true);
-            }
+    // Add video media to the canvas
+    private void addVideo() {
+        File file = showFileChooser("Select Video", "Video Files", VIDEO_FORMATS);
+        if (file != null) {
+            createMediaPlayer(file.toURI().toString(), "Video Player", true);
         }
+    }
 
+    // Show file chooser dialog
+    private File showFileChooser(String title, String description, String... extensions) {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle(title);
+        fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter(description, extensions)
+        );
+        return fileChooser.showOpenDialog(null);
+    }
 
-        //Selected file
-        private File showFileChooser(String title, String description, String... extensions) {
-            FileChooser fileChooser = new FileChooser();
-            fileChooser.setTitle(title);
+    // Create a media player for audio/video
+    private void createMediaPlayer(String mediaURI, String title, boolean isVideo) {
+        try {
+            Media media = new Media(mediaURI);
+            mediaPlayer = new MediaPlayer(media);
+
+            // Create media player UI
+            Stage mediaStage = new Stage();
+            mediaStage.setTitle(title);
+
+            // Playback controls
+            Button playBtn = new Button("▶");
+            Button pauseBtn = new Button("⏸");
+            Button stopBtn = new Button("⏹");
+
+            playBtn.setOnAction(e -> mediaPlayer.play());
+            pauseBtn.setOnAction(e -> mediaPlayer.pause());
+            stopBtn.setOnAction(e -> {
+                mediaPlayer.stop();
+                mediaPlayer.seek(Duration.ZERO);
+            });
+
+            // Volume control
+            Slider volumeSlider = new Slider(0, 1, 0.5);
+            mediaPlayer.volumeProperty().bind(volumeSlider.valueProperty());
+
+            // Timeline controls
+            Slider timeSlider = new Slider();
+            Label currentTimeLabel = new Label("00:00");
+            Label totalTimeLabel = new Label("00:00");
+
+            // Update time display during playback
+            mediaPlayer.currentTimeProperty().addListener((observable, oldValue, newValue) -> {
+                if (!timeSlider.isValueChanging()) {
+                    timeSlider.setValue(newValue.toSeconds());
+                }
+                currentTimeLabel.setText(formatTime(newValue));
+            });
+
+            // Initialize duration display
+            mediaPlayer.setOnReady(() -> {
+                Duration totalDuration = media.getDuration();
+                timeSlider.setMax(totalDuration.toSeconds());
+                totalTimeLabel.setText(formatTime(totalDuration));
+            });
+
+            // Seek functionality
+            timeSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
+                if (timeSlider.isValueChanging()) {
+                    mediaPlayer.seek(Duration.seconds(newValue.doubleValue()));
+                }
+            });
+
+            // Layout controls
+            HBox timeBox = new HBox(5, currentTimeLabel, timeSlider, totalTimeLabel);
+            timeBox.setAlignment(Pos.CENTER);
+
+            HBox controls = new HBox(10, playBtn, pauseBtn, stopBtn,
+                    new Label("Volume:"), volumeSlider);
+            controls.setAlignment(Pos.CENTER);
+            controls.setPadding(new Insets(10));
+
+            BorderPane root = new BorderPane();
+
+            // Add video display if video media
+            if (isVideo) {
+                mediaView = new MediaView(mediaPlayer);
+                mediaView.setFitWidth(640);
+                root.setCenter(mediaView);
+            } else {
+                root.setCenter(new Label("Now Playing: " + title));
+            }
+
+            // Combine all UI elements
+            VBox bottomPanel = new VBox(10, timeBox, controls);
+            bottomPanel.setPadding(new Insets(10));
+            root.setBottom(bottomPanel);
+
+            // Show media player window
+            mediaStage.setScene(new Scene(root, isVideo ? 640 : 400, isVideo ? 480 : 150));
+            mediaStage.show();
+
+            // Clean up on window close
+            mediaStage.setOnCloseRequest(e -> mediaPlayer.dispose());
+        } catch (Exception e) {
+            showError("Media Error", "Could not load media: " + e.getMessage());
+        }
+    }
+
+    // Format time duration as MM:SS
+    private String formatTime(Duration duration) {
+        int minutes = (int) duration.toMinutes();
+        int seconds = (int) duration.toSeconds() % 60;
+        return String.format("%02d:%02d", minutes, seconds);
+    }
+
+    // Save current canvas state for undo/redo
+    private void saveState() {
+        undoStack.push(canvas.snapshot(null, null));
+        redoStack.clear();
+    }
+
+    // Undo the last action
+    private void undo() {
+        if (undoStack.size() > 1) {
+            redoStack.push(undoStack.pop());
+            redrawCanvas();
+        }
+    }
+
+    // Redo the last undone action
+    private void redo() {
+        if (!redoStack.isEmpty()) {
+            undoStack.push(redoStack.pop());
+            redrawCanvas();
+        }
+    }
+
+    // Clear the entire canvas
+    private void clearCanvas() {
+        gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+        undoStack.clear();
+        redoStack.clear();
+        saveState();
+    }
+
+    // Save canvas to an image file
+    private void saveCanvas() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Save Canvas");
+
+        // Add supported format filters
+        for (String format : SAVE_FORMATS) {
             fileChooser.getExtensionFilters().add(
-                    new FileChooser.ExtensionFilter(description, extensions)
+                    new FileChooser.ExtensionFilter(format, "*." + format.toLowerCase())
             );
-            return fileChooser.showOpenDialog(null);
         }
 
-
-        //Creates a media player for audio or video
-        private void createMediaPlayer(String mediaURI, String title, boolean isVideo) {
+        File file = fileChooser.showSaveDialog(null);
+        if (file != null) {
             try {
-                Media media = new Media(mediaURI);
-                mediaPlayer = new MediaPlayer(media);
+                String extension = fileChooser.getSelectedExtensionFilter()
+                        .getDescription().split("\\(")[0].trim();
 
-                // Create media player window
-                Stage mediaStage = new Stage();
-                mediaStage.setTitle(title);
-
-                // Player controls
-                Button playBtn = new Button("▶");
-                Button pauseBtn = new Button("⏸");
-                Button stopBtn = new Button("⏹");
-
-                // Button actions
-                playBtn.setOnAction(e -> mediaPlayer.play());
-                pauseBtn.setOnAction(e -> mediaPlayer.pause());
-                stopBtn.setOnAction(e -> {
-                    mediaPlayer.stop();
-                    mediaPlayer.seek(Duration.ZERO);
-                });
-
-                // Volume control
-                Slider volumeSlider = new Slider(0, 1, 0.5);
-                mediaPlayer.volumeProperty().bind(volumeSlider.valueProperty());
-
-                // Time slider and labels
-                Slider timeSlider = new Slider();
-                Label currentTimeLabel = new Label("00:00");
-                Label totalTimeLabel = new Label("00:00");
-
-                // Update current time during playback
-                mediaPlayer.currentTimeProperty().addListener((observable, oldValue, newValue) -> {
-                    if (!timeSlider.isValueChanging()) {
-                        timeSlider.setValue(newValue.toSeconds());
-                    }
-                    currentTimeLabel.setText(formatTime(newValue));
-                });
-
-                // Set up total duration when media is ready
-                mediaPlayer.setOnReady(() -> {
-                    Duration totalDuration = media.getDuration();
-                    timeSlider.setMax(totalDuration.toSeconds());
-                    totalTimeLabel.setText(formatTime(totalDuration));
-                });
-
-                // Seek when time slider is moved
-                timeSlider.valueProperty().addListener((observable, oldValue, newValue) -> {
-                    if (timeSlider.isValueChanging()) {
-                        mediaPlayer.seek(Duration.seconds(newValue.doubleValue()));
-                    }
-                });
-
-                // Time display layout
-                HBox timeBox = new HBox(5, currentTimeLabel, timeSlider, totalTimeLabel);
-                timeBox.setAlignment(Pos.CENTER);
-
-                // Control buttons layout
-                HBox controls = new HBox(10, playBtn, pauseBtn, stopBtn,
-                        new Label("Volume:"), volumeSlider);
-                controls.setAlignment(Pos.CENTER);
-                controls.setPadding(new Insets(10));
-
-                // Main layout
-                BorderPane root = new BorderPane();
-
-                // Add video display if this is a video
-                if (isVideo) {
-                    mediaView = new MediaView(mediaPlayer);
-                    mediaView.setFitWidth(640);
-                    root.setCenter(mediaView);
-                } else {
-                    root.setCenter(new Label("Now Playing: " + title));
-                }
-
-                // Combine controls at bottom
-                VBox bottomPanel = new VBox(10, timeBox, controls);
-                bottomPanel.setPadding(new Insets(10));
-                root.setBottom(bottomPanel);
-
-                // Show the media player window
-                mediaStage.setScene(new Scene(root, isVideo ? 640 : 400, isVideo ? 480 : 150));
-                mediaStage.show();
-
-                // Clean up when window is closed
-                mediaStage.setOnCloseRequest(e -> mediaPlayer.dispose());
+                // Save canvas snapshot to file
+                ImageIO.write(
+                        SwingFXUtils.fromFXImage(canvas.snapshot(null, null), null),
+                        extension,
+                        file
+                );
             } catch (Exception e) {
-                showError("Media Error", "Could not load media: " + e.getMessage());
+                showError("Save Error", "Could not save file: " + e.getMessage());
             }
         }
-
-
-        //Formats duration as MM:SS
-        private String formatTime(Duration duration) {
-            int minutes = (int) duration.toMinutes();
-            int seconds = (int) duration.toSeconds() % 60;
-            return String.format("%02d:%02d", minutes, seconds);
-        }
     }
 
-
-    // class managing the toolbar UI
-
-    private static class ToolbarManager {
-        private final DrawingCanvas drawingCanvas;  // Reference to drawing canvas
-        private final MediaHandler mediaHandler;    // Reference to media handler
-
-
-        //constractor drawing canvas instance
-        public ToolbarManager(DrawingCanvas drawingCanvas, MediaHandler mediaHandler) {
-            this.drawingCanvas = drawingCanvas;
-            this.mediaHandler = mediaHandler;
-        }
-
-
-        //creates and return Configured HBox containing toolbar controls
-        public HBox createToolbar() {
-            // Create toolbar buttons
-            Button undoBtn = createButton("Undo", drawingCanvas::undo);
-            Button redoBtn = createButton("Redo", drawingCanvas::redo);
-            Button clearBtn = createButton("Clear", drawingCanvas::clearCanvas);
-            Button saveBtn = createButton("Save", drawingCanvas::saveCanvas);
-            Button audioBtn = createButton("Audio", mediaHandler::addAudio);
-            Button videoBtn = createButton("Video", mediaHandler::addVideo);
-
-            // Create and configure toolbar container
-            HBox toolbar = new HBox(10);
-            toolbar.setPadding(new Insets(10));
-
-            // Add all controls to toolbar
-            toolbar.getChildren().addAll(
-                    drawingCanvas.getToolSelector(),
-                    new Label("Stroke:"), drawingCanvas.getStrokeColorPicker(),
-                    new Label("Fill:"), drawingCanvas.getFillColorPicker(),
-                    new Label("Size:"), drawingCanvas.getSizeSlider(),
-                    drawingCanvas.getFontSelector(), drawingCanvas.getTextInput(),
-                    undoBtn, redoBtn, clearBtn, saveBtn, audioBtn, videoBtn
-            );
-            return toolbar;
-        }
-
-
-        //create a toolbar button
-        private Button createButton(String text, Runnable action) {
-            Button button = new Button(text);
-            button.setOnAction(e -> action.run());
-            return button;
-        }
-    }
-
-
-    //shows an error diolog
-    private static void showError(String title, String message) {
+    // Show error dialog
+    private void showError(String title, String message) {
         Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle(title);
         alert.setHeaderText(null);
